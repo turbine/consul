@@ -232,6 +232,7 @@ func (s *HTTPServer) registerHandlers(enableDebug bool) {
 	s.mux.HandleFunc("/v1/agent/check/pass/", s.wrap(s.AgentCheckPass))
 	s.mux.HandleFunc("/v1/agent/check/warn/", s.wrap(s.AgentCheckWarn))
 	s.mux.HandleFunc("/v1/agent/check/fail/", s.wrap(s.AgentCheckFail))
+	s.mux.HandleFunc("/v1/agent/check/update/", s.wrap(s.AgentCheckUpdate))
 
 	s.mux.HandleFunc("/v1/agent/service/register", s.wrap(s.AgentRegisterService))
 	s.mux.HandleFunc("/v1/agent/service/deregister/", s.wrap(s.AgentDeregisterService))
@@ -297,7 +298,7 @@ func (s *HTTPServer) wrap(handler func(resp http.ResponseWriter, req *http.Reque
 		formVals, err := url.ParseQuery(req.URL.RawQuery)
 		if err != nil {
 			s.logger.Printf("[ERR] http: Failed to decode query: %s from=%s", err, req.RemoteAddr)
-			resp.WriteHeader(500)
+			resp.WriteHeader(http.StatusInternalServerError) // 500
 			return
 		}
 		logURL := req.URL.String()
@@ -331,10 +332,10 @@ func (s *HTTPServer) wrap(handler func(resp http.ResponseWriter, req *http.Reque
 	HAS_ERR:
 		if err != nil {
 			s.logger.Printf("[ERR] http: Request %s %v, error: %v from=%s", req.Method, logURL, err, req.RemoteAddr)
-			code := 500
+			code := http.StatusInternalServerError // 500
 			errMsg := err.Error()
 			if strings.Contains(errMsg, "Permission denied") || strings.Contains(errMsg, "ACL not found") {
-				code = 403
+				code = http.StatusForbidden // 403
 			}
 			resp.WriteHeader(code)
 			resp.Write([]byte(err.Error()))
@@ -363,22 +364,28 @@ func (s *HTTPServer) wrap(handler func(resp http.ResponseWriter, req *http.Reque
 	return f
 }
 
+// Returns true if the UI is enabled.
+func (s *HTTPServer) IsUIEnabled() bool {
+	return s.uiDir != "" || s.agent.config.EnableUi
+}
+
 // Renders a simple index page
 func (s *HTTPServer) Index(resp http.ResponseWriter, req *http.Request) {
 	// Check if this is a non-index path
 	if req.URL.Path != "/" {
-		resp.WriteHeader(404)
+		resp.WriteHeader(http.StatusNotFound) // 404
 		return
 	}
 
-	// Check if we have no UI configured
-	if s.uiDir == "" {
+	// Give them something helpful if there's no UI so they at least know
+	// what this server is.
+	if !s.IsUIEnabled() {
 		resp.Write([]byte("Consul Agent"))
 		return
 	}
 
 	// Redirect to the UI endpoint
-	http.Redirect(resp, req, "/ui/", 301)
+	http.Redirect(resp, req, "/ui/", http.StatusMovedPermanently) // 301
 }
 
 // decodeBody is used to decode a JSON request body
@@ -439,7 +446,7 @@ func parseWait(resp http.ResponseWriter, req *http.Request, b *structs.QueryOpti
 	if wait := query.Get("wait"); wait != "" {
 		dur, err := time.ParseDuration(wait)
 		if err != nil {
-			resp.WriteHeader(400)
+			resp.WriteHeader(http.StatusBadRequest) // 400
 			resp.Write([]byte("Invalid wait time"))
 			return true
 		}
@@ -448,7 +455,7 @@ func parseWait(resp http.ResponseWriter, req *http.Request, b *structs.QueryOpti
 	if idx := query.Get("index"); idx != "" {
 		index, err := strconv.ParseUint(idx, 10, 64)
 		if err != nil {
-			resp.WriteHeader(400)
+			resp.WriteHeader(http.StatusBadRequest) // 400
 			resp.Write([]byte("Invalid index"))
 			return true
 		}
@@ -468,7 +475,7 @@ func parseConsistency(resp http.ResponseWriter, req *http.Request, b *structs.Qu
 		b.RequireConsistent = true
 	}
 	if b.AllowStale && b.RequireConsistent {
-		resp.WriteHeader(400)
+		resp.WriteHeader(http.StatusBadRequest) // 400
 		resp.Write([]byte("Cannot specify ?stale with ?consistent, conflicting semantics."))
 		return true
 	}

@@ -1,4 +1,68 @@
-## 0.6.3 (January 15, 2015)
+## 0.6.4 (March 16, 2016)
+
+BACKWARDS INCOMPATIBILITIES:
+
+* Added a new `query` ACL type to manage prepared query names, and stopped capturing
+  ACL tokens by default when prepared queries are created. This won't affect existing
+  queries and how they are executed, but this will affect how they are managed. Now
+  management of prepared queries can be delegated within an organization. If you use
+  prepared queries, you'll need to read the
+  [Consul 0.6.4 upgrade instructions](https://www.consul.io/docs/upgrade-specific.html)
+  before upgrading to this version of Consul. [GH-1748]
+* Consul's Go API client now pools connections by default, and requires you to manually
+  opt-out of this behavior. Previously, idle connections were supported and their
+  lifetime was managed by a finalizer, but this wasn't reliable in certain situations.
+  If you reuse an API client object during the lifetime of your application, then there's
+  nothing to do. If you have short-lived API client objects, you may need to configure them
+  using the new `api.DefaultNonPooledConfig()` method to avoid leaking idle connections. [GH-1825]
+* Consul's Go API client's `agent.UpdateTTL()` function was updated in a way that will
+  only work with Consul 0.6.4 and later. The `agent.PassTTL()`, `agent.WarnTTL()`, and
+  `agent.FailTTL()` functions were not affected and will continue work with older
+  versions of Consul. [GH-1794]
+
+FEATURES:
+
+* Added new template prepared queries which allow you to define a prefix (possibly even
+  an empty prefix) to apply prepared query features like datacenter failover to multiple
+  services with a single query definition. This makes it easy to apply a common policy to
+  multiple services without having to manage many prepared queries. See
+  [Prepared Query Templates](https://www.consul.io/docs/agent/http/query.html#templates)
+  for more details. [GH-1764]
+* Added a new ability to translate address lookups when doing queries of nodes in
+  remote datacenters via DNS using a new `translate_wan_addrs` configuration
+  option. This allows the node to be reached within its own datacenter using its
+  local address, and reached from other datacenters using its WAN address, which is
+  useful in hybrid setups with mixed networks. [GH-1698]
+
+IMPROVEMENTS:
+
+* Added a new `disable_hostname` configuration option to control whether Consul's
+  runtime telemetry gets prepended with the host name. All of the telemetry
+  configuration has also been moved to a `telemetry` nested structure, but the old
+  format is currently still supported. [GH-1284]
+* Consul's Go dependencies are now vendored using Godep. [GH-1714]
+* Added support for `EnableTagOverride` for the catalog in the Go API client. [GH-1726]
+* Consul now ships built from Go 1.6. [GH-1735]
+* Added a new `/v1/agent/check/update/<check id>` API for updating TTL checks which
+  makes it easier to send large check output as part of a PUT body and not a query
+  parameter. [GH-1785].
+* Added a default set of `Accept` headers for HTTP checks. [GH-1819]
+* Added support for RHEL7/Systemd in Terraform example. [GH-1629]
+
+BUG FIXES:
+
+* Updated the internal web UI (`-ui` option) to latest released build, fixing
+  an ACL-related issue and the broken settings icon. [GH-1619]
+* Fixed an issue where blocking KV reads could miss updates and return stale data
+  when another key whose name is a prefix of the watched key was updated. [GH-1632]
+* Fixed the redirect from `/` to `/ui` when the internal web UI (`-ui` option) is
+  enabled. [GH-1713]
+* Updated memberlist to pull in a fix for leaking goroutines when performing TCP
+  fallback pings. This affected users with frequent UDP connectivity problems. [GH-1802]
+* Added a fix to trim UDP DNS responses so they don't exceed 512 bytes. [GH-1813]
+* Updated go-dockerclient to fix Docker health checks with Docker 1.10. [GH-1706]
+
+## 0.6.3 (January 15, 2016)
 
 BUG FIXES:
 
@@ -6,7 +70,7 @@ BUG FIXES:
   it could consume CPU and show spurious failures for health checks, watch
   handlers, and `consul exec` commands [GH-1592]
 
-## 0.6.2 (January 13, 2015)
+## 0.6.2 (January 13, 2016)
 
 SECURITY:
 
@@ -16,7 +80,7 @@ SECURITY:
 This is a security-only release; other than the version number and building
 against Go 1.5.3, there are no changes from 0.6.1.
 
-## 0.6.1 (January 6, 2015)
+## 0.6.1 (January 6, 2016)
 
 BACKWARDS INCOMPATIBILITIES:
 
@@ -35,7 +99,7 @@ IMPROVEMENTS:
   messages and HTTP access logs [GH-1513] [GH-1448]
 * API clients configured for insecure SSL now use an HTTP transport that's
   set up the same way as the Go default transport [GH-1526]
-* Added new per-host telemery on DNS requests [GH-1537]
+* Added new per-host telemetry on DNS requests [GH-1537]
 * Added support for reaping child processes which is useful when running
   Consul as PID 1 in Docker containers [GH-1539]
 * Added new `-ui` command line and `ui` config option that enables a built-in
@@ -102,12 +166,12 @@ BUG FIXES:
 * Fixed bad lock handler execution during shutdown [GH-1080] [GH-1158] [GH-1214]
 * Added missing support for AAAA queries for nodes [GH-1222]
 * Tokens passed from the CLI or API work for maint mode [GH-1230]
-* Fixed service derigister/reregister flaps that could happen during
+* Fixed service deregister/reregister flaps that could happen during
   `consul reload` [GH-1235]
 * Fixed the Go API client to properly distinguish between expired sessions
   and sessions that don't exist [GH-1041]
 * Fixed the KV section of the UI to work on Safari [GH-1321]
-* Cleaned up Javascript for built-in UI with bug fixes [GH-1338]
+* Cleaned up JavaScript for built-in UI with bug fixes [GH-1338]
 
 IMPROVEMENTS:
 
@@ -244,8 +308,8 @@ FEATURES:
  * Merge `armon/consul-api` into `api` as official Go client.
  * Support for distributed locks and semaphores in API client [GH-594] [GH-600]
  * Support for native HTTP health checks [GH-592]
- * Support for node and service maintanence modes [GH-606]
- * Added new "consul maint" command to easily toggle maintanence modes [GH-625]
+ * Support for node and service maintenance modes [GH-606]
+ * Added new "consul maint" command to easily toggle maintenance modes [GH-625]
  * Added new "consul lock" command for simple highly-available deployments.
    This lets Consul manage the leader election and easily handle N+1 deployments
    without the applications being Consul aware. [GH-619]
@@ -325,7 +389,7 @@ BUG FIXES:
  * Fixing issue with Session ID and ACL ID generation. [GH-391]
  * Fixing multiple headers for /v1/event/list endpoint [GH-361]
  * Fixing graceful leave of leader causing invalid Raft peers [GH-360]
- * Fixing bug with closing TLS connction on error
+ * Fixing bug with closing TLS connection on error
  * Fixing issue with node reaping [GH-371]
  * Fixing aggressive deadlock time [GH-389]
  * Fixing syslog filter level [GH-272]
@@ -337,7 +401,7 @@ BUG FIXES:
 IMPROVEMENTS:
 
  * Use "critical" health state instead of "unknown" [GH-341]
- * Consul service can be targed for exec [GH-344]
+ * Consul service can be targeted for exec [GH-344]
  * Provide debug logging for session invalidation [GH-390]
  * Added "Deregister" button to UI [GH-364]
  * Added `enable_truncate` DNS configuration flag [GH-376]
@@ -406,7 +470,7 @@ BUG FIXES:
   * Fixed handling of `-rejoin` flag
   * Restored 0.2 TLS behavior, thanks to @nelhage [GH-233]
   * Fix the statsite flags, thanks to @nelhage [GH-243]
-  * Fixed filters on criticial / non-passing checks [GH-241]
+  * Fixed filters on critical / non-passing checks [GH-241]
   * Fixed initial log compaction crash [GH-297]
 
 IMPROVEMENTS:
@@ -437,7 +501,7 @@ IMPROVEMENTS:
   * `info` includes build version information
   * Sorted results for datacneter list [GH-198]
   * Switch multiplexing to yamux
-  * Allow multiple CA certis in ca_file [GH-174]
+  * Allow multiple CA certs in ca_file [GH-174]
   * Enable logging to syslog. [GH-105]
   * Allow raw key value lookup [GH-150]
   * Log encryption enabled [GH-151]
@@ -489,7 +553,7 @@ BUG FIXES:
   * Windows agents won't show "failed to decode" errors on every RPC
       request.
   * Fixed memory leak with RPC clients. [GH-149]
-  * Serf name conflict resoultion disabled. [GH-97]
+  * Serf name conflict resolution disabled. [GH-97]
   * Raft deadlock possibility fixed. [GH-141]
 
 MISC:
@@ -512,7 +576,7 @@ FEATURES:
       allow for higher throughput and read scalability. [GH-68]
   * /v1/health/service/ endpoint can take an optional `?passing` flag
       to filter to only nodes with passing results. [GH-57]
-  * The KV endpoint suports listing keys with the `?keys` query parameter,
+  * The KV endpoint supports listing keys with the `?keys` query parameter,
       and limited up to a separator using `?separator=`.
 
 IMPROVEMENTS:

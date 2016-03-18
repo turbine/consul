@@ -16,6 +16,7 @@ import (
 
 	"github.com/armon/go-metrics"
 	"github.com/armon/go-metrics/datadog"
+	"github.com/hashicorp/consul/lib"
 	"github.com/hashicorp/consul/watch"
 	"github.com/hashicorp/go-checkpoint"
 	"github.com/hashicorp/go-reap"
@@ -424,7 +425,7 @@ func (c *Command) setupAgent(config *Config, logOutput io.Writer, logWriter *log
 
 		// Do an immediate check within the next 30 seconds
 		go func() {
-			time.Sleep(randomStagger(30 * time.Second))
+			time.Sleep(lib.RandomStagger(30 * time.Second))
 			c.checkpointResults(checkpoint.Check(updateParams))
 		}()
 	}
@@ -587,12 +588,13 @@ func (c *Command) Run(args []string) int {
 	*/
 	inm := metrics.NewInmemSink(10*time.Second, time.Minute)
 	metrics.DefaultInmemSignal(inm)
-	metricsConf := metrics.DefaultConfig(config.StatsitePrefix)
+	metricsConf := metrics.DefaultConfig(config.Telemetry.StatsitePrefix)
+	metricsConf.EnableHostname = !config.Telemetry.DisableHostname
 
 	// Configure the statsite sink
 	var fanout metrics.FanoutSink
-	if config.StatsiteAddr != "" {
-		sink, err := metrics.NewStatsiteSink(config.StatsiteAddr)
+	if config.Telemetry.StatsiteAddr != "" {
+		sink, err := metrics.NewStatsiteSink(config.Telemetry.StatsiteAddr)
 		if err != nil {
 			c.Ui.Error(fmt.Sprintf("Failed to start statsite sink. Got: %s", err))
 			return 1
@@ -601,8 +603,8 @@ func (c *Command) Run(args []string) int {
 	}
 
 	// Configure the statsd sink
-	if config.StatsdAddr != "" {
-		sink, err := metrics.NewStatsdSink(config.StatsdAddr)
+	if config.Telemetry.StatsdAddr != "" {
+		sink, err := metrics.NewStatsdSink(config.Telemetry.StatsdAddr)
 		if err != nil {
 			c.Ui.Error(fmt.Sprintf("Failed to start statsd sink. Got: %s", err))
 			return 1
@@ -611,14 +613,14 @@ func (c *Command) Run(args []string) int {
 	}
 
 	// Configure the DogStatsd sink
-	if config.DogStatsdAddr != "" {
+	if config.Telemetry.DogStatsdAddr != "" {
 		var tags []string
 
-		if config.DogStatsdTags != nil {
-			tags = config.DogStatsdTags
+		if config.Telemetry.DogStatsdTags != nil {
+			tags = config.Telemetry.DogStatsdTags
 		}
 
-		sink, err := datadog.NewDogStatsdSink(config.DogStatsdAddr, metricsConf.HostName)
+		sink, err := datadog.NewDogStatsdSink(config.Telemetry.DogStatsdAddr, metricsConf.HostName)
 		if err != nil {
 			c.Ui.Error(fmt.Sprintf("Failed to start DogStatsd sink. Got: %s", err))
 			return 1

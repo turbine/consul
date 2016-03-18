@@ -2,12 +2,15 @@ package consul
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"reflect"
 	"testing"
 
 	"github.com/hashicorp/consul/consul/state"
 	"github.com/hashicorp/consul/consul/structs"
+	"github.com/hashicorp/consul/lib"
+	"github.com/hashicorp/go-uuid"
 	"github.com/hashicorp/raft"
 )
 
@@ -36,6 +39,14 @@ func makeLog(buf []byte) *raft.Log {
 		Type:  raft.LogCommand,
 		Data:  buf,
 	}
+}
+
+func generateUUID() (ret string) {
+	var err error
+	if ret, err = uuid.GenerateUUID(); err != nil {
+		panic(fmt.Sprintf("Unable to generate a UUID, %v", err))
+	}
+	return ret
 }
 
 func TestFSM_RegisterNode(t *testing.T) {
@@ -349,7 +360,7 @@ func TestFSM_SnapshotRestore(t *testing.T) {
 
 	// Add some state
 	fsm.state.EnsureNode(1, &structs.Node{Node: "foo", Address: "127.0.0.1"})
-	fsm.state.EnsureNode(2, &structs.Node{Node: "baz", Address: "127.0.0.2"})
+	fsm.state.EnsureNode(2, &structs.Node{Node: "baz", Address: "127.0.0.2", TaggedAddresses: map[string]string{"hello": "1.2.3.4"}})
 	fsm.state.EnsureService(3, "foo", &structs.NodeService{ID: "web", Service: "web", Tags: nil, Address: "127.0.0.1", Port: 80})
 	fsm.state.EnsureService(4, "foo", &structs.NodeService{ID: "db", Service: "db", Tags: []string{"primary"}, Address: "127.0.0.1", Port: 5000})
 	fsm.state.EnsureService(5, "baz", &structs.NodeService{ID: "web", Service: "web", Tags: nil, Address: "127.0.0.2", Port: 80})
@@ -442,7 +453,18 @@ func TestFSM_SnapshotRestore(t *testing.T) {
 		t.Fatalf("err: %s", err)
 	}
 	if len(nodes) != 2 {
-		t.Fatalf("Bad: %v", nodes)
+		t.Fatalf("bad: %v", nodes)
+	}
+	if nodes[0].Node != "baz" ||
+		nodes[0].Address != "127.0.0.2" ||
+		len(nodes[0].TaggedAddresses) != 1 ||
+		nodes[0].TaggedAddresses["hello"] != "1.2.3.4" {
+		t.Fatalf("bad: %v", nodes[0])
+	}
+	if nodes[1].Node != "foo" ||
+		nodes[1].Address != "127.0.0.1" ||
+		len(nodes[1].TaggedAddresses) != 0 {
+		t.Fatalf("bad: %v", nodes[1])
 	}
 
 	_, fooSrv, err := fsm2.state.NodeServices("foo")
@@ -452,7 +474,7 @@ func TestFSM_SnapshotRestore(t *testing.T) {
 	if len(fooSrv.Services) != 2 {
 		t.Fatalf("Bad: %v", fooSrv)
 	}
-	if !strContains(fooSrv.Services["db"].Tags, "primary") {
+	if !lib.StrContains(fooSrv.Services["db"].Tags, "primary") {
 		t.Fatalf("Bad: %v", fooSrv)
 	}
 	if fooSrv.Services["db"].Port != 5000 {

@@ -45,7 +45,7 @@ type StateStore struct {
 	tableWatches map[string]*FullTableWatch
 
 	// kvsWatch holds the special prefix watch for the key value store.
-	kvsWatch *PrefixWatch
+	kvsWatch *PrefixWatchManager
 
 	// kvsGraveyard manages tombstones for the key value store.
 	kvsGraveyard *Graveyard
@@ -110,7 +110,7 @@ func NewStateStore(gc *TombstoneGC) (*StateStore, error) {
 		schema:       schema,
 		db:           db,
 		tableWatches: tableWatches,
-		kvsWatch:     NewPrefixWatch(),
+		kvsWatch:     NewPrefixWatchManager(),
 		kvsGraveyard: NewGraveyard(gc),
 		lockDelay:    NewDelay(),
 	}
@@ -413,7 +413,7 @@ func (s *StateStore) getWatchTables(method string) []string {
 		return []string{"acls"}
 	case "Coordinates":
 		return []string{"coordinates"}
-	case "PreparedQueryGet", "PreparedQueryLookup", "PreparedQueryList":
+	case "PreparedQueryGet", "PreparedQueryResolve", "PreparedQueryList":
 		return []string{"prepared-queries"}
 	}
 
@@ -448,7 +448,7 @@ func (s *StateStore) GetQueryWatch(method string) Watch {
 
 // GetKVSWatch returns a watch for the given prefix in the key value store.
 func (s *StateStore) GetKVSWatch(prefix string) Watch {
-	return s.kvsWatch.GetSubwatch(prefix)
+	return s.kvsWatch.NewPrefixWatch(prefix)
 }
 
 // EnsureRegistration is used to make sure a node, service, and check
@@ -474,7 +474,11 @@ func (s *StateStore) EnsureRegistration(idx uint64, req *structs.RegisterRequest
 func (s *StateStore) ensureRegistrationTxn(tx *memdb.Txn, idx uint64, watches *DumbWatchManager,
 	req *structs.RegisterRequest) error {
 	// Add the node.
-	node := &structs.Node{Node: req.Node, Address: req.Address}
+	node := &structs.Node{
+		Node:            req.Node,
+		Address:         req.Address,
+		TaggedAddresses: req.TaggedAddresses,
+	}
 	if err := s.ensureNodeTxn(tx, idx, watches, node); err != nil {
 		return fmt.Errorf("failed inserting node: %s", err)
 	}
@@ -1373,8 +1377,9 @@ func (s *StateStore) parseNodes(tx *memdb.Txn, idx uint64,
 
 		// Create the wrapped node
 		dump := &structs.NodeInfo{
-			Node:    node.Node,
-			Address: node.Address,
+			Node:            node.Node,
+			Address:         node.Address,
+			TaggedAddresses: node.TaggedAddresses,
 		}
 
 		// Query the node services
@@ -2146,15 +2151,14 @@ func (s *StateStore) deleteSessionTxn(tx *memdb.Txn, idx uint64, watches *DumbWa
 		return fmt.Errorf("failed prepared query lookup: %s", err)
 	}
 	{
-		var objs []interface{}
-		for query := queries.Next(); query != nil; query = queries.Next() {
-			objs = append(objs, query)
+		var ids []string
+		for wrapped := queries.Next(); wrapped != nil; wrapped = queries.Next() {
+			ids = append(ids, toPreparedQuery(wrapped).ID)
 		}
 
 		// Do the delete in a separate loop so we don't trash the iterator.
-		for _, obj := range objs {
-			q := obj.(*structs.PreparedQuery)
-			if err := s.preparedQueryDeleteTxn(tx, idx, watches, q.ID); err != nil {
+		for _, id := range ids {
+			if err := s.preparedQueryDeleteTxn(tx, idx, watches, id); err != nil {
 				return fmt.Errorf("failed prepared query delete: %s", err)
 			}
 		}

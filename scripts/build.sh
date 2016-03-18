@@ -1,7 +1,10 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # This script builds the application from source for multiple platforms.
 set -e
+
+export GO15VENDOREXPERIMENT=1
+export CGO_ENABLED=0
 
 # Get the parent directory of where this script is.
 SOURCE="${BASH_SOURCE[0]}"
@@ -20,10 +23,6 @@ GIT_DESCRIBE=$(git describe --tags)
 XC_ARCH=${XC_ARCH:-"386 amd64 arm"}
 XC_OS=${XC_OS:-"solaris darwin freebsd linux windows"}
 
-# Install dependencies
-echo "==> Getting dependencies..."
-go get ./...
-
 # Delete the old dir
 echo "==> Removing old directory..."
 rm -f bin/*
@@ -38,7 +37,7 @@ fi
 
 # Build!
 echo "==> Building..."
-gox \
+$GOPATH/bin/gox \
     -os="${XC_OS}" \
     -arch="${XC_ARCH}" \
     -ldflags "-X main.GitCommit ${GIT_COMMIT}${GIT_DIRTY} -X main.GitDescribe ${GIT_DESCRIBE}" \

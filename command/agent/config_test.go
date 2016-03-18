@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/hashicorp/consul/lib"
 )
 
 func TestConfigEncryptBytes(t *testing.T) {
@@ -248,6 +250,25 @@ func TestDecodeConfig(t *testing.T) {
 		t.Fatalf("bad: %#v", config)
 	}
 	if config.AdvertiseAddrs.RPC.String() != "127.0.0.5:1234" {
+		t.Fatalf("bad: %#v", config)
+	}
+
+	// WAN address translation disabled by default
+	config, err = DecodeConfig(bytes.NewReader([]byte(`{}`)))
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+	if config.TranslateWanAddrs != false {
+		t.Fatalf("bad: %#v", config)
+	}
+
+	// WAN address translation
+	input = `{"translate_wan_addrs": true}`
+	config, err = DecodeConfig(bytes.NewReader([]byte(input)))
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+	if config.TranslateWanAddrs != true {
 		t.Fatalf("bad: %#v", config)
 	}
 
@@ -633,10 +654,10 @@ func TestDecodeConfig(t *testing.T) {
 		t.Fatalf("err: %s", err)
 	}
 
-	if config.StatsiteAddr != "127.0.0.1:7250" {
+	if config.Telemetry.StatsiteAddr != "127.0.0.1:7250" {
 		t.Fatalf("bad: %#v", config)
 	}
-	if config.StatsdAddr != "127.0.0.1:7251" {
+	if config.Telemetry.StatsdAddr != "127.0.0.1:7251" {
 		t.Fatalf("bad: %#v", config)
 	}
 
@@ -646,19 +667,19 @@ func TestDecodeConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %s", err)
 	}
-	if config.DogStatsdAddr != "127.0.0.1:7254" {
+	if config.Telemetry.DogStatsdAddr != "127.0.0.1:7254" {
 		t.Fatalf("bad: %#v", config)
 	}
 
-	if len(config.DogStatsdTags) != 2 {
+	if len(config.Telemetry.DogStatsdTags) != 2 {
 		t.Fatalf("bad: %#v", config)
 	}
 
-	if config.DogStatsdTags[0] != "tag_1:val_1" {
+	if config.Telemetry.DogStatsdTags[0] != "tag_1:val_1" {
 		t.Fatalf("bad: %#v", config)
 	}
 
-	if config.DogStatsdTags[1] != "tag_2:val_2" {
+	if config.Telemetry.DogStatsdTags[1] != "tag_2:val_2" {
 		t.Fatalf("bad: %#v", config)
 	}
 
@@ -668,7 +689,32 @@ func TestDecodeConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %s", err)
 	}
-	if config.StatsitePrefix != "my_prefix" {
+	if config.Telemetry.StatsitePrefix != "my_prefix" {
+		t.Fatalf("bad: %#v", config)
+	}
+
+	// New telemetry
+	input = `{"telemetry": { "statsite_prefix": "my_prefix", "statsite_address": "127.0.0.1:7250", "statsd_address":"127.0.0.1:7251", "disable_hostname": true, "dogstatsd_addr": "1.1.1.1:111", "dogstatsd_tags": [ "tag_1:val_1" ] } }`
+	config, err = DecodeConfig(bytes.NewReader([]byte(input)))
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+	if config.Telemetry.StatsitePrefix != "my_prefix" {
+		t.Fatalf("bad: %#v", config)
+	}
+	if config.Telemetry.StatsiteAddr != "127.0.0.1:7250" {
+		t.Fatalf("bad: %#v", config)
+	}
+	if config.Telemetry.StatsdAddr != "127.0.0.1:7251" {
+		t.Fatalf("bad: %#v", config)
+	}
+	if config.Telemetry.DisableHostname != true {
+		t.Fatalf("bad: %#v", config)
+	}
+	if config.Telemetry.DogStatsdAddr != "1.1.1.1:111" {
+		t.Fatalf("bad: %#v", config)
+	}
+	if config.Telemetry.DogStatsdTags[0] != "tag_1:val_1" {
 		t.Fatalf("bad: %#v", config)
 	}
 
@@ -1103,7 +1149,7 @@ func TestDecodeConfig_Service(t *testing.T) {
 		t.Fatalf("bad: %v", serv)
 	}
 
-	if !strContains(serv.Tags, "master") {
+	if !lib.StrContains(serv.Tags, "master") {
 		t.Fatalf("bad: %v", serv)
 	}
 
@@ -1189,6 +1235,14 @@ func TestMergeConfig(t *testing.T) {
 		CheckUpdateIntervalRaw: "8m",
 		RetryIntervalRaw:       "10s",
 		RetryIntervalWanRaw:    "10s",
+		Telemetry: Telemetry{
+			DisableHostname: false,
+			StatsdAddr:      "nope",
+			StatsiteAddr:    "nope",
+			StatsitePrefix:  "nope",
+			DogStatsdAddr:   "nope",
+			DogStatsdTags:   []string{"nope"},
+		},
 	}
 
 	b := &Config{
@@ -1267,12 +1321,15 @@ func TestMergeConfig(t *testing.T) {
 				"handler": "foobar",
 			},
 		},
-		DisableRemoteExec:         true,
-		StatsiteAddr:              "127.0.0.1:7250",
-		StatsitePrefix:            "stats_prefix",
-		StatsdAddr:                "127.0.0.1:7251",
-		DogStatsdAddr:             "127.0.0.1:7254",
-		DogStatsdTags:             []string{"tag_1:val_1", "tag_2:val_2"},
+		DisableRemoteExec: true,
+		Telemetry: Telemetry{
+			StatsiteAddr:    "127.0.0.1:7250",
+			StatsitePrefix:  "stats_prefix",
+			StatsdAddr:      "127.0.0.1:7251",
+			DisableHostname: true,
+			DogStatsdAddr:   "127.0.0.1:7254",
+			DogStatsdTags:   []string{"tag_1:val_1", "tag_2:val_2"},
+		},
 		DisableUpdateCheck:        true,
 		DisableAnonymousSignature: true,
 		HTTPAPIResponseHeaders: map[string]string{
@@ -1357,6 +1414,13 @@ func TestReadConfigPaths_dir(t *testing.T) {
 	// A non-json file, shouldn't be read
 	err = ioutil.WriteFile(filepath.Join(td, "c"),
 		[]byte(`{"node_name": "bad"}`), 0644)
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	// An empty file shouldn't be read
+	err = ioutil.WriteFile(filepath.Join(td, "d.json"),
+		[]byte{}, 0664)
 	if err != nil {
 		t.Fatalf("err: %s", err)
 	}

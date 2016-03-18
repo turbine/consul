@@ -78,6 +78,8 @@ func (s *HTTPServer) AgentForceLeave(resp http.ResponseWriter, req *http.Request
 	return nil, s.agent.ForceLeave(addr)
 }
 
+const invalidCheckMessage = "Must provide TTL or Script/DockerContainerID/HTTP/TCP and Interval"
+
 func (s *HTTPServer) AgentRegisterCheck(resp http.ResponseWriter, req *http.Request) (interface{}, error) {
 	var args CheckDefinition
 	// Fixup the type decode of TTL or Interval
@@ -110,7 +112,7 @@ func (s *HTTPServer) AgentRegisterCheck(resp http.ResponseWriter, req *http.Requ
 	chkType := &args.CheckType
 	if !chkType.Valid() {
 		resp.WriteHeader(400)
-		resp.Write([]byte("Must provide TTL or Script and Interval!"))
+		resp.Write([]byte(invalidCheckMessage))
 		return nil, nil
 	}
 
@@ -159,6 +161,58 @@ func (s *HTTPServer) AgentCheckFail(resp http.ResponseWriter, req *http.Request)
 	checkID := strings.TrimPrefix(req.URL.Path, "/v1/agent/check/fail/")
 	note := req.URL.Query().Get("note")
 	if err := s.agent.UpdateCheck(checkID, structs.HealthCritical, note); err != nil {
+		return nil, err
+	}
+	s.syncChanges()
+	return nil, nil
+}
+
+// checkUpdate is the payload for a PUT to AgentCheckUpdate.
+type checkUpdate struct {
+	// Status us one of the structs.Health* states, "passing", "warning", or
+	// "critical".
+	Status string
+
+	// Output is the information to post to the UI for operators as the
+	// output of the process that decided to hit the TTL check. This is
+	// different from the note field that's associated with the check
+	// itself.
+	Output string
+}
+
+// AgentCheckUpdate is a PUT-based alternative to the GET-based Pass/Warn/Fail
+// APIs.
+func (s *HTTPServer) AgentCheckUpdate(resp http.ResponseWriter, req *http.Request) (interface{}, error) {
+	if req.Method != "PUT" {
+		resp.WriteHeader(405)
+		return nil, nil
+	}
+
+	var update checkUpdate
+	if err := decodeBody(req, &update, nil); err != nil {
+		resp.WriteHeader(400)
+		resp.Write([]byte(fmt.Sprintf("Request decode failed: %v", err)))
+		return nil, nil
+	}
+
+	switch update.Status {
+	case structs.HealthPassing:
+	case structs.HealthWarning:
+	case structs.HealthCritical:
+	default:
+		resp.WriteHeader(400)
+		resp.Write([]byte(fmt.Sprintf("Invalid check status: '%s'", update.Status)))
+		return nil, nil
+	}
+
+	total := len(update.Output)
+	if total > CheckBufSize {
+		update.Output = fmt.Sprintf("%s ... (captured %d of %d bytes)",
+			update.Output[:CheckBufSize], CheckBufSize, total)
+	}
+
+	checkID := strings.TrimPrefix(req.URL.Path, "/v1/agent/check/update/")
+	if err := s.agent.UpdateCheck(checkID, update.Status, update.Output); err != nil {
 		return nil, err
 	}
 	s.syncChanges()
@@ -220,7 +274,7 @@ func (s *HTTPServer) AgentRegisterService(resp http.ResponseWriter, req *http.Re
 		}
 		if !check.Valid() {
 			resp.WriteHeader(400)
-			resp.Write([]byte("Must provide TTL or Script and Interval!"))
+			resp.Write([]byte(invalidCheckMessage))
 			return nil, nil
 		}
 	}

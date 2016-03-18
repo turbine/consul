@@ -472,8 +472,9 @@ func (s *consulSnapshot) persistNodes(sink raft.SnapshotSink,
 	for node := nodes.Next(); node != nil; node = nodes.Next() {
 		n := node.(*structs.Node)
 		req := structs.RegisterRequest{
-			Node:    n.Node,
-			Address: n.Address,
+			Node:            n.Node,
+			Address:         n.Address,
+			TaggedAddresses: n.TaggedAddresses,
 		}
 
 		// Register the node itself
@@ -609,9 +610,9 @@ func (s *consulSnapshot) persistPreparedQueries(sink raft.SnapshotSink,
 		return err
 	}
 
-	for query := queries.Next(); query != nil; query = queries.Next() {
+	for _, query := range queries {
 		sink.Write([]byte{byte(structs.PreparedQueryRequestType)})
-		if err := encoder.Encode(query.(*structs.PreparedQuery)); err != nil {
+		if err := encoder.Encode(query); err != nil {
 			return err
 		}
 	}

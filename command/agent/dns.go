@@ -365,6 +365,19 @@ INVALID:
 	resp.SetRcode(req, dns.RcodeNameError)
 }
 
+// translateAddr is used to provide the final, translated address for a node,
+// depending on how this agent and the other node are configured.
+func (d *DNSServer) translateAddr(dc string, node *structs.Node) string {
+	addr := node.Address
+	if d.agent.config.TranslateWanAddrs && (d.agent.config.Datacenter != dc) {
+		wanAddr := node.TaggedAddresses["wan"]
+		if wanAddr != "" {
+			addr = wanAddr
+		}
+	}
+	return addr
+}
+
 // nodeLookup is used to handle a node query
 func (d *DNSServer) nodeLookup(network, datacenter, node string, req, resp *dns.Msg) {
 	// Only handle ANY, A and AAAA type requests
@@ -405,7 +418,8 @@ RPC:
 	}
 
 	// Add the node record
-	records := d.formatNodeRecord(out.NodeServices.Node, out.NodeServices.Node.Address,
+	addr := d.translateAddr(datacenter, out.NodeServices.Node)
+	records := d.formatNodeRecord(out.NodeServices.Node, addr,
 		req.Question[0].Name, qType, d.config.NodeTTL)
 	if records != nil {
 		resp.Answer = append(resp.Answer, records...)
@@ -475,6 +489,25 @@ func (d *DNSServer) formatNodeRecord(node *structs.Node, addr, qName string, qTy
 	return records
 }
 
+// trimAnswers makes sure a UDP response is not longer than allowed by RFC 1035.
+// We first enforce an arbitrary limit, and then make sure the response doesn't
+// exceed 512 bytes.
+func trimAnswers(resp *dns.Msg) (trimmed bool) {
+	numAnswers := len(resp.Answer)
+
+	// This cuts UDP responses to a useful but limited number of responses.
+	if numAnswers > maxServiceResponses {
+		resp.Answer = resp.Answer[:maxServiceResponses]
+	}
+
+	// This enforces the hard limit of 512 bytes per the RFC.
+	for len(resp.Answer) > 0 && resp.Len() > 512 {
+		resp.Answer = resp.Answer[:len(resp.Answer)-1]
+	}
+
+	return len(resp.Answer) < numAnswers
+}
+
 // serviceLookup is used to handle a service query
 func (d *DNSServer) serviceLookup(network, datacenter, service, tag string, req, resp *dns.Msg) {
 	// Make an RPC request
@@ -528,24 +561,24 @@ RPC:
 
 	// Add various responses depending on the request
 	qType := req.Question[0].Qtype
-	d.serviceNodeRecords(out.Nodes, req, resp, ttl)
+	d.serviceNodeRecords(datacenter, out.Nodes, req, resp, ttl)
 
 	if qType == dns.TypeSRV {
 		d.serviceSRVRecords(datacenter, out.Nodes, req, resp, ttl)
 	}
 
 	// If the network is not TCP, restrict the number of responses
-	if network != "tcp" && len(resp.Answer) > maxServiceResponses {
-		resp.Answer = resp.Answer[:maxServiceResponses]
+	if network != "tcp" {
+		wasTrimmed := trimAnswers(resp)
 
 		// Flag that there are more records to return in the UDP response
-		if d.config.EnableTruncate {
+		if wasTrimmed && d.config.EnableTruncate {
 			resp.Truncated = true
 		}
 	}
 
-	// If the answer is empty, return not found
-	if len(resp.Answer) == 0 {
+	// If the answer is empty and the response isn't truncated, return not found
+	if len(resp.Answer) == 0 && !resp.Truncated {
 		d.addSOA(d.domain, resp)
 		return
 	}
@@ -624,42 +657,43 @@ RPC:
 
 	// Add various responses depending on the request.
 	qType := req.Question[0].Qtype
-	d.serviceNodeRecords(out.Nodes, req, resp, ttl)
+	d.serviceNodeRecords(datacenter, out.Nodes, req, resp, ttl)
 	if qType == dns.TypeSRV {
 		d.serviceSRVRecords(datacenter, out.Nodes, req, resp, ttl)
 	}
 
 	// If the network is not TCP, restrict the number of responses.
-	if network != "tcp" && len(resp.Answer) > maxServiceResponses {
-		resp.Answer = resp.Answer[:maxServiceResponses]
+	if network != "tcp" {
+		wasTrimmed := trimAnswers(resp)
 
-		// Flag that there are more records to return in the UDP
-		// response.
-		if d.config.EnableTruncate {
+		// Flag that there are more records to return in the UDP response
+		if wasTrimmed && d.config.EnableTruncate {
 			resp.Truncated = true
 		}
 	}
 
-	// If the answer is empty, return not found.
-	if len(resp.Answer) == 0 {
+	// If the answer is empty and the response isn't truncated, return not found
+	if len(resp.Answer) == 0 && !resp.Truncated {
 		d.addSOA(d.domain, resp)
 		return
 	}
 }
 
 // serviceNodeRecords is used to add the node records for a service lookup
-func (d *DNSServer) serviceNodeRecords(nodes structs.CheckServiceNodes, req, resp *dns.Msg, ttl time.Duration) {
+func (d *DNSServer) serviceNodeRecords(dc string, nodes structs.CheckServiceNodes, req, resp *dns.Msg, ttl time.Duration) {
 	qName := req.Question[0].Name
 	qType := req.Question[0].Qtype
 	handled := make(map[string]struct{})
 	for _, node := range nodes {
-		// Avoid duplicate entries, possible if a node has
-		// the same service on multiple ports, etc.
-		addr := node.Node.Address
+		// Start with the translated address but use the service address,
+		// if specified.
+		addr := d.translateAddr(dc, node.Node)
 		if node.Service.Address != "" {
 			addr = node.Service.Address
 		}
 
+		// Avoid duplicate entries, possible if a node has
+		// the same service on multiple ports, etc.
 		if _, ok := handled[addr]; ok {
 			continue
 		}
@@ -700,8 +734,9 @@ func (d *DNSServer) serviceSRVRecords(dc string, nodes structs.CheckServiceNodes
 		}
 		resp.Answer = append(resp.Answer, srvRec)
 
-		// Determine advertised address
-		addr := node.Node.Address
+		// Start with the translated address but use the service address,
+		// if specified.
+		addr := d.translateAddr(dc, node.Node)
 		if node.Service.Address != "" {
 			addr = node.Service.Address
 		}

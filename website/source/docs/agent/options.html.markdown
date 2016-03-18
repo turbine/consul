@@ -41,18 +41,22 @@ The options below are all specified on the command-line.
   If this address is not routable, the node will be in a constant flapping state
   as other nodes will treat the non-routability as a failure.
 
-* <a name="_advertise-wan"></a><a href="#_advertise-wan">`-advertise-wan`</a> - The advertise wan
-  address is used to change the address that we advertise to server nodes joining
-  through the WAN. By default, the [`-advertise`](#_advertise) address is advertised.
-  However, in some cases all members of all datacenters cannot be on the same
-  physical or virtual network, especially on hybrid setups mixing cloud and private datacenters.
-  This flag enables server nodes gossiping through the public network for the WAN while using
-  private VLANs for gossiping to each other and their client agents.
+* <a name="_advertise-wan"></a><a href="#_advertise-wan">`-advertise-wan`</a> - The
+  advertise WAN address is used to change the address that we advertise to server nodes
+  joining through the WAN. This can also be set on client agents when used in combination
+  with the <a href="#translate_wan_addrs">`translate_wan_addrs`</a> configuration
+  option. By default, the [`-advertise`](#_advertise) address is advertised. However, in some
+  cases all members of all datacenters cannot be on the same physical or virtual network,
+  especially on hybrid setups mixing cloud and private datacenters. This flag enables server
+  nodes gossiping through the public network for the WAN while using private VLANs for gossiping
+  to each other and their client agents, and it allows client agents to be reached at this
+  address when being accessed from a remote datacenter if the remote datacenter is configured
+  with <a href="#translate_wan_addrs">`translate_wan_addrs`</a>.
 
 * <a name="_atlas"></a><a href="#_atlas">`-atlas`</a> - This flag
   enables [Atlas](https://atlas.hashicorp.com) integration.
-  It is used to provide the Atlas infrastructure name and the SCADA connection. The format of 
-  this is `username/environment`. This enables Atlas features such as the Monitoring UI 
+  It is used to provide the Atlas infrastructure name and the SCADA connection. The format of
+  this is `username/environment`. This enables Atlas features such as the Monitoring UI
   and node auto joining.
 
 * <a name="_atlas_join"></a><a href="#_atlas_join">`-atlas-join`</a> - When set, enables auto-join
@@ -273,9 +277,43 @@ definitions support being updated during a reload.
         "type": "checks",
         "handler": "/usr/bin/health-check-handler.sh"
     }
-  ]
+  ],
+  "telemetry": {
+     "statsite_address": "127.0.0.1:2180"
+  }
 }
 ```
+
+#### Example Configuration File, with TLS
+
+```javascript
+{
+  "datacenter": "east-aws",
+  "data_dir": "/opt/consul",
+  "log_level": "INFO",
+  "node_name": "foobar",
+  "server": true,
+  "addresses": {
+    "https": "0.0.0.0"
+  },
+  "ports": {
+    "https": 8080
+  },
+  "key_file": "/etc/pki/tls/private/my.key",
+  "cert_file": "/etc/pki/tls/certs/my.crt",
+  "ca_file": "/etc/pki/tls/certs/ca-bundle.crt"
+}
+```
+
+Note that the use of `port`:
+
+```javascript
+"ports": {
+  "https": 8080
+}
+```
+
+Consul will not enable TLS for the HTTP API unless the `https` port has been assigned a port number `> 0`.
 
 #### Configuration Key Reference
 
@@ -328,29 +366,31 @@ definitions support being updated during a reload.
   Both `rpc` and `http` support binding to Unix domain sockets. A socket can be
   specified in the form `unix:///path/to/socket`. A new domain socket will be
   created at the given path. If the specified file path already exists, Consul
-  will attempt to clear the file and create the domain socket in its place.
-  <br><br>
-  The permissions of the socket file are tunable via the [`unix_sockets` config
-  construct](#unix_sockets).
+  will attempt to clear the file and create the domain socket in its place. The
+  permissions of the socket file are tunable via the [`unix_sockets` config construct](#unix_sockets).
   <br><br>
   When running Consul agent commands against Unix socket interfaces, use the
   `-rpc-addr` or `-http-addr` arguments to specify the path to the socket. You
   can also place the desired values in `CONSUL_RPC_ADDR` and `CONSUL_HTTP_ADDR`
-  environment variables. For TCP addresses, these should be in the form ip:port.
+  environment variables.
+  <br><br>
+  For TCP addresses, these should simply be an IP address without the port. For
+  example: `10.0.0.1`, not `10.0.0.1:8500`. Ports are set separately in the
+  <a href="#ports">`ports`</a> structure.
   <br><br>
   The following keys are valid:
   * `dns` - The DNS server. Defaults to `client_addr`
   * `http` - The HTTP API. Defaults to `client_addr`
   * `https` - The HTTPS API. Defaults to `client_addr`
   * `rpc` - The RPC endpoint. Defaults to `client_addr`
-
 * <a name="advertise_addr"></a><a href="#advertise_addr">`advertise_addr`</a> Equivalent to
   the [`-advertise` command-line flag](#_advertise).
 
 * <a name="advertise_addrs"></a><a href="#advertise_addrs">`advertise_addrs`</a> Allows to set
   the advertised addresses for SerfLan, SerfWan and RPC together with the port. This gives
-  you more control than (#_advertise) or (#_advertise-wan) while it serves the same purpose.
-  These settings might override (#_advertise) and (#_advertise-wan).
+  you more control than <a href="#_advertise">`-advertise`</a> or <a href="#_advertise-wan">`-advertise-wan`</a>
+  while it serves the same purpose. These settings might override <a href="#_advertise">`-advertise`</a> or
+  <a href="#_advertise-wan">`-advertise-wan`</a>
   <br><br>
   This is a nested setting that allows the following keys:
   * `serf_lan` - The SerfLan address. Accepts values in the form of "host:port" like "10.23.31.101:8301".
@@ -453,8 +493,9 @@ definitions support being updated during a reload.
   setting this value.
 
   * <a name="enable_truncate"></a><a href="#enable_truncate">`enable_truncate`</a> If set to
-  true, a UDP DNS query that would return more than 3 records will set the truncated flag,
-  indicating to clients that they should re-query using TCP to get the full set of records.
+  true, a UDP DNS query that would return more than 3 records, or more than would fit into a valid
+  UDP response, will set the truncated flag, indicating to clients that they should re-query
+  using TCP to get the full set of records.
 
   * <a name="only_passing"></a><a href="#only_passing">`only_passing`</a> If set to true, any
   nodes whose healthchecks are not passing will be excluded from DNS results. By default (or
@@ -572,33 +613,60 @@ definitions support being updated during a reload.
 * <a name="start_join_wan"></a><a href="#start_join_wan">`start_join_wan`</a> An array of strings specifying
   addresses of WAN nodes to [`-join-wan`](#_join_wan) upon startup.
 
-* <a name="statsd_addr"></a><a href="#statsd_addr">`statsd_addr`</a> This provides the address of a
-  statsd instance in the format `host:port`.  If provided, Consul will send various telemetry information
-  to that instance for aggregation. This can be used to capture runtime information. This sends UDP packets
-  only and can be used with statsd or statsite.
+* <a name="telemetry"></a><a href="#telemetry">`telemetry`</a> This is a nested object that configures where Consul
+  sends its runtime telemetry, and contains the following keys:
 
-* <a name="dogstatsd_addr"></a><a href="#dogstatsd_addr">`dogstatsd_addr`</a> This provides the
-  address of a DogStatsD instance in the format `host:port`. DogStatsD is a protocol-compatible flavor of
-  statsd, with the added ability to decorate metrics with tags and event information. If provided, Consul will
-  send various telemetry information to that instance for aggregation. This can be used to capture runtime
-  information.
+  * <a name="telemetry-statsd_address"></a><a href="#telemetry-statsd_address">`statsd_address`</a> This provides the
+    address of a statsd instance.  If provided, Consul will send various telemetry information to that instance for
+    aggregation. This can be used to capture runtime information. This sends UDP packets only and can be used with
+    statsd or statsite.
 
-* <a name="dogstatsd_tags"></a><a href="#dogstatsd_tags">`dogstatsd_tags`</a> This provides a list of global tags
-  that will be added to all telemetry packets sent to DogStatsD. It is a list of strings, where each string
-  looks like "my_tag_name:my_tag_value".
+  * <a name="telemetry-statsite_address"></a><a href="#telemetry-statsite_address">`statsite_address`</a> This provides
+    the address of a statsite instance. If provided, Consul will stream various telemetry information to that instance
+    for aggregation. This can be used to capture runtime information. This streams via TCP and can only be used with
+    statsite.
 
-* <a name="statsite_addr"></a><a href="#statsite_addr">`statsite_addr`</a> This provides the address of a
-  statsite instance in the format `host:port`. If provided, Consul will stream various telemetry information
-  to that instance for aggregation. This can be used to capture runtime information. This streams via TCP and
-  can only be used with statsite.
+  * <a name="telemetry-statsite_prefix"></a><a href="#telemetry-statsite_prefix">`statsite_prefix`</a>
+    The prefix used while writing all telemetry data to statsite. By default, this is set to "consul".
 
-* <a name="statsite_prefix"></a><a href="#statsite_prefix">`statsite_prefix`</a>
-  The prefix used while writing all telemetry data to statsite. By default, this
-  is set to "consul".
+  * <a name="telemetry-dogstatsd_addr"></a><a href="#telemetry-dogstatsd_addr">`dogstatsd_addr`</a> This provides the
+    address of a DogStatsD instance in the format `host:port`. DogStatsD is a protocol-compatible flavor of
+    statsd, with the added ability to decorate metrics with tags and event information. If provided, Consul will
+    send various telemetry information to that instance for aggregation. This can be used to capture runtime
+    information.
+
+  * <a name="telemetry-dogstatsd_tags"></a><a href="#telemetry-dogstatsd_tags">`dogstatsd_tags`</a> This provides a list of global tags
+    that will be added to all telemetry packets sent to DogStatsD. It is a list of strings, where each string
+    looks like "my_tag_name:my_tag_value".
+
+  * <a name="telemetry-disable_hostname"></a><a href="#telemetry-disable_hostname">`disable_hostname`</a>
+    This controls whether or not to prepend runtime telemetry with the machine's hostname, defaults to false.
+
+* <a name="statsd_addr"></a><a href="#statsd_addr">`statsd_addr`</a> Deprecated, see
+  the <a href="#telemetry">telemetry</a> structure
+
+* <a name="statsite_addr"></a><a href="#statsite_addr">`statsite_addr`</a> Deprecated, see
+  the <a href="#telemetry">telemetry</a> structure
+
+* <a name="statsite_prefix"></a><a href="#statsite_prefix">`statsite_prefix`</a> Deprecated, see
+  the <a href="#telemetry">telemetry</a> structure
+
+* <a name="dogstatsd_addr"></a><a href="#dogstatsd_addr">`dogstatsd_addr`</a> Deprecated, see
+  he <a href="#telemetry">telemetry</a> structure
+
+* <a name="dogstatsd_tags"></a><a href="#dogstatsd_tags">`dogstatsd_tags`</a> Deprecated, see
+  the <a href="#telemetry">telemetry</a> structure
 
 * <a name="syslog_facility"></a><a href="#syslog_facility">`syslog_facility`</a> When
   [`enable_syslog`](#enable_syslog) is provided, this controls to which
   facility messages are sent. By default, `LOCAL0` will be used.
+
+* <a name="translate_wan_addrs"</a><a href="#translate_wan_addrs">`translate_wan_addrs`</a> If
+  set to true, Consul will prefer a node's configured <a href="#_advertise-wan">WAN address</a>
+  when servicing DNS requests for a node in a remote datacenter. This allows the node to be
+  reached within its own datacenter using its local address, and reached from other datacenters
+  using its WAN address, which is useful in hybrid setups with mixed networks. This is disabled
+  by default.
 
 * <a name="ui"></a><a href="#ui">`ui`</a> - Equivalent to the [`-ui`](#_ui)
   command-line flag.
@@ -654,7 +722,7 @@ definitions support being updated during a reload.
    [watch documentation](/docs/agent/watches.html) for more detail. Watches can be
    modified when the configuration is reloaded.
 
-## Ports Used
+## <a id="ports"></a>Ports Used
 
 Consul requires up to 5 different ports to work properly, some on
 TCP, UDP, or both protocols. Below we document the requirements for each
@@ -677,7 +745,11 @@ port.
 
 * DNS Interface (Default 8600). Used to resolve DNS queries. TCP and UDP.
 
-## <a id="reloadable-configuration"></a>Reloadable Configuration</a>
+Consul will also make an outgoing connection to HashiCorp's servers for
+Atlas-related features and to check for the availability of newer versions
+of Consul. This will be a TLS-secured TCP connection to `scada.hashicorp.com:7223`.
+
+## <a id="reloadable-configuration"></a>Reloadable Configuration
 
 Reloading configuration does not reload all configuration items. The
 items which are reloaded include:

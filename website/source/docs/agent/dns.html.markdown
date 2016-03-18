@@ -187,7 +187,10 @@ The `query or name` is the ID or given name of an existing
 [Prepared Query](/docs/agent/http/query.html). These behave like standard service
 queries but provide a much richer set of features, such as filtering by multiple
 tags and automatically failing over to look for services in remote datacenters if
-no healthy nodes are available in the local datacenter.
+no healthy nodes are available in the local datacenter. Consul 0.6.4 and later also
+added support for [prepared query templates](/docs/agent/http/query.html#templates)
+which can match names using a prefix match, allowing one template to apply to
+potentially many services.
 
 To allow for simple load balancing, the set of nodes returned is randomized each time.
 Both A and SRV records are supported. SRV records provide the port that a service is
@@ -207,3 +210,12 @@ By default, all DNS results served by Consul set a 0 TTL value. This disables
 caching of DNS results. However, there are many situations in which caching is
 desirable for performance and scalability. This is discussed more in the guide
 for [DNS Caching](/docs/guides/dns-cache.html).
+
+## WAN Address Translation
+
+Be default, Consul DNS queries will return a node's local address, even when
+being queried from a remote datacenter. If you need to use a different address
+to reach a node from outside its datacenter, you can configure this behavior
+using the [`advertise-wan`](/docs/agent/options.html#_advertise-wan) and
+[`translate_wan_addrs`](/docs/agent/options.html#translate_wan_addrs) configuration
+options.
